@@ -10,8 +10,11 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "^0.15.5",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.3",
-    "@nomicfoundation/hardhat-ignition": "^0.15.5"
+    "hardhat": "^2.22.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2"
   }
 }
