@@ -6,14 +6,14 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract TreasureHunt is ReentrancyGuard {
     uint8 public constant GRID_SIZE = 10;
     uint8 public constant TOTAL_CELLS = GRID_SIZE * GRID_SIZE;
-    uint8 public treasurePosition;
+    uint8 internal treasurePosition;
     uint256 public round;
     uint256 public prizePool;
     address public winner;
 
-    address[] public players; // List of players
-    mapping(address => uint8) public playerPositions; // Players Position on the Grid
-    mapping(address => bool) public hasMoved; // A player Moved or not on a Perticular round
+    address[] public players;
+    mapping(address => uint8) public playerPositions;
+    mapping(address => bool) public hasMoved;
 
     event PlayerMoved(address indexed player, uint8 position);
     event TreasureMoved(uint8 newPosition);
@@ -36,76 +36,66 @@ contract TreasureHunt is ReentrancyGuard {
         _;
     }
 
-  function move(uint8 newPosition) public payable nonReentrant {
-    require(msg.value > 0, "Must send ETH to participate.");
-    
-    // Register player's move
-    if (playerPositions[msg.sender] == 0) {
-        players.push(msg.sender); // Add new player to the list
+    function move(uint8 newPosition) public payable nonReentrant {
+        require(msg.value > 0, "Must send ETH to participate.");
+
+        if (playerPositions[msg.sender] == 0) {
+            players.push(msg.sender);
+        }
+
+        if (newPosition == treasurePosition) {
+            playerPositions[msg.sender] = newPosition;
+            prizePool += msg.value;
+            hasMoved[msg.sender] = true;
+
+            emit PlayerMoved(msg.sender, newPosition);
+            _winGame();
+        } else if (newPosition % 5 == 0) {
+            playerPositions[msg.sender] = newPosition;
+            prizePool += msg.value;
+            hasMoved[msg.sender] = true;
+
+            emit PlayerMoved(msg.sender, newPosition);
+
+            _moveTreasure(newPosition);
+        } else {
+            require(!hasMoved[msg.sender], "Player has already moved this round.");
+            require(newPosition < TOTAL_CELLS, "Invalid move.");
+            require(isAdjacent(playerPositions[msg.sender], newPosition), "Move must be adjacent.");
+
+            playerPositions[msg.sender] = newPosition;
+            prizePool += msg.value;
+            hasMoved[msg.sender] = true;
+
+            emit PlayerMoved(msg.sender, newPosition);
+            _moveTreasure(newPosition);
+        }
     }
-
-    // Check if the move is to a multiple of 5, and bypass the adjacency check
-    if (newPosition == treasurePosition) {
-        // Winning move
-        playerPositions[msg.sender] = newPosition;
-        prizePool += msg.value;
-        hasMoved[msg.sender] = true;
-
-        emit PlayerMoved(msg.sender, newPosition);
-        _winGame();
-    } else if (newPosition % 5 == 0) {
-        // Multiple of 5 move, bypass the adjacency check and move the treasure
-        playerPositions[msg.sender] = newPosition;
-        prizePool += msg.value;
-        hasMoved[msg.sender] = true;
-
-        emit PlayerMoved(msg.sender, newPosition);
-
-        _moveTreasure(newPosition); // Treasure should move after this move
-    } else {
-        // Perform regular move validation (adjacent move)
-        require(!hasMoved[msg.sender], "Player has already moved this round.");
-        require(newPosition < TOTAL_CELLS, "Invalid move.");
-        require(isAdjacent(playerPositions[msg.sender], newPosition), "Move must be adjacent.");
-        
-        playerPositions[msg.sender] = newPosition;
-        prizePool += msg.value;
-        hasMoved[msg.sender] = true;
-
-        emit PlayerMoved(msg.sender, newPosition);
-
-        // Move the treasure if conditions are met
-        _moveTreasure(newPosition);
-    }
-}
 
     function _moveTreasure(uint8 playerPosition) internal {
         if (playerPosition % 5 == 0) {
-            // Move treasure to a random adjacent position
             treasurePosition = _getRandomAdjacentPosition(treasurePosition);
         } else if (_isPrime(playerPosition)) {
-            // Move treasure to a completely new random position
             treasurePosition = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % TOTAL_CELLS);
         }
 
         emit TreasureMoved(treasurePosition);
     }
 
-   function _winGame() internal {
-    winner = msg.sender;
-    uint256 reward = (prizePool * 90) / 100;
-    payable(winner).transfer(reward);
-    prizePool = address(this).balance; // Remaining 10% stays for the next round
-    emit GameWon(winner, reward);
+    function _winGame() internal {
+        winner = msg.sender;
+        uint256 reward = (prizePool * 90) / 100;
+        payable(winner).transfer(reward);
+        prizePool = address(this).balance;
+        emit GameWon(winner, reward);
 
-    _resetGame();
-}
+        _resetGame();
+    }
 
     function _resetGame() internal {
         round++;
         treasurePosition = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, block.number))) % TOTAL_CELLS);
 
-        // Reset player movements for the new round
         for (uint256 i = 0; i < players.length; i++) {
             hasMoved[players[i]] = false;
         }
@@ -119,20 +109,18 @@ contract TreasureHunt is ReentrancyGuard {
     function _getAdjacentPositions(uint8 position) internal pure returns (uint8[] memory) {
         uint8 count = 0;
 
-        // Count the number of valid adjacent positions
-        if (position >= GRID_SIZE) count++; // Up
-        if (position < TOTAL_CELLS - GRID_SIZE) count++; // Down
-        if (position % GRID_SIZE != 0) count++; // Left
-        if ((position + 1) % GRID_SIZE != 0) count++; // Right
+        if (position >= GRID_SIZE) count++;
+        if (position < TOTAL_CELLS - GRID_SIZE) count++;
+        if (position % GRID_SIZE != 0) count++;
+        if ((position + 1) % GRID_SIZE != 0) count++;
 
         uint8[] memory adjacent = new uint8[](count);
         count = 0;
 
-        // Populate the adjacent positions
-        if (position >= GRID_SIZE) adjacent[count++] = position - GRID_SIZE; // Up
-        if (position < TOTAL_CELLS - GRID_SIZE) adjacent[count++] = position + GRID_SIZE; // Down
-        if (position % GRID_SIZE != 0) adjacent[count++] = position - 1; // Left
-        if ((position + 1) % GRID_SIZE != 0) adjacent[count++] = position + 1; // Right
+        if (position >= GRID_SIZE) adjacent[count++] = position - GRID_SIZE;
+        if (position < TOTAL_CELLS - GRID_SIZE) adjacent[count++] = position + GRID_SIZE;
+        if (position % GRID_SIZE != 0) adjacent[count++] = position - 1;
+        if ((position + 1) % GRID_SIZE != 0) adjacent[count++] = position + 1;
 
         return adjacent;
     }
@@ -145,13 +133,20 @@ contract TreasureHunt is ReentrancyGuard {
         return true;
     }
 
-   function isAdjacent(uint8 pos1, uint8 pos2) internal pure returns (bool) {
-    // Avoid overflow/underflow on edges
-    bool isUp = (pos1 >= GRID_SIZE && pos1 - GRID_SIZE == pos2);
-    bool isDown = (pos1 < TOTAL_CELLS - GRID_SIZE && pos1 + GRID_SIZE == pos2);
-    bool isLeft = (pos1 % GRID_SIZE != 0 && pos1 - 1 == pos2);
-    bool isRight = ((pos1 + 1) % GRID_SIZE != 0 && pos1 + 1 == pos2);
+    function isAdjacent(uint8 pos1, uint8 pos2) internal pure returns (bool) {
+        bool isUp = (pos1 >= GRID_SIZE && pos1 - GRID_SIZE == pos2);
+        bool isDown = (pos1 < TOTAL_CELLS - GRID_SIZE && pos1 + GRID_SIZE == pos2);
+        bool isLeft = (pos1 % GRID_SIZE != 0 && pos1 - 1 == pos2);
+        bool isRight = ((pos1 + 1) % GRID_SIZE != 0 && pos1 + 1 == pos2);
 
-    return isUp || isDown || isLeft || isRight;
-}
+        return isUp || isDown || isLeft || isRight;
+    }
+
+    function getTreasurePosition() public view returns (uint8) {
+        return treasurePosition;
+    }
+
+    function getGameState() public view returns (address, uint256) {
+        return ( winner, prizePool);
+    }
 }
