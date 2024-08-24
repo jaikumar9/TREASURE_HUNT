@@ -22,6 +22,7 @@ contract TreasureHunt is ReentrancyGuard {
     constructor() payable {
         treasurePosition = uint8(uint256(keccak256(abi.encodePacked(block.timestamp, block.number))) % TOTAL_CELLS);
         round = 1;
+        prizePool = msg.value;
     }
 
     modifier onlyOncePerRound() {
@@ -35,26 +36,48 @@ contract TreasureHunt is ReentrancyGuard {
         _;
     }
 
-    function move(uint8 newPosition) public payable onlyOncePerRound validMove(newPosition) nonReentrant {
-        require(msg.value > 0, "Must send ETH to participate.");
+  function move(uint8 newPosition) public payable nonReentrant {
+    require(msg.value > 0, "Must send ETH to participate.");
+    
+    // Register player's move
+    if (playerPositions[msg.sender] == 0) {
+        players.push(msg.sender); // Add new player to the list
+    }
 
-        // Register player's move
-        if (playerPositions[msg.sender] == 0) {
-            players.push(msg.sender); // Add new player to the list
-        }
+    // Check if the move is to a multiple of 5, and bypass the adjacency check
+    if (newPosition == treasurePosition) {
+        // Winning move
+        playerPositions[msg.sender] = newPosition;
+        prizePool += msg.value;
+        hasMoved[msg.sender] = true;
+
+        emit PlayerMoved(msg.sender, newPosition);
+        _winGame();
+    } else if (newPosition % 5 == 0) {
+        // Multiple of 5 move, bypass the adjacency check and move the treasure
         playerPositions[msg.sender] = newPosition;
         prizePool += msg.value;
         hasMoved[msg.sender] = true;
 
         emit PlayerMoved(msg.sender, newPosition);
 
-        // Check for winning condition
-        if (newPosition == treasurePosition) {
-            _winGame();
-        } else {
-            _moveTreasure(newPosition);
-        }
+        _moveTreasure(newPosition); // Treasure should move after this move
+    } else {
+        // Perform regular move validation (adjacent move)
+        require(!hasMoved[msg.sender], "Player has already moved this round.");
+        require(newPosition < TOTAL_CELLS, "Invalid move.");
+        require(isAdjacent(playerPositions[msg.sender], newPosition), "Move must be adjacent.");
+        
+        playerPositions[msg.sender] = newPosition;
+        prizePool += msg.value;
+        hasMoved[msg.sender] = true;
+
+        emit PlayerMoved(msg.sender, newPosition);
+
+        // Move the treasure if conditions are met
+        _moveTreasure(newPosition);
     }
+}
 
     function _moveTreasure(uint8 playerPosition) internal {
         if (playerPosition % 5 == 0) {
@@ -68,15 +91,15 @@ contract TreasureHunt is ReentrancyGuard {
         emit TreasureMoved(treasurePosition);
     }
 
-    function _winGame() internal {
-        winner = msg.sender;
-        uint256 reward = (prizePool * 90) / 100;
-        payable(winner).transfer(reward);
-        prizePool = address(this).balance; // Remaining 10% stays for the next round
-        emit GameWon(winner, reward);
+   function _winGame() internal {
+    winner = msg.sender;
+    uint256 reward = (prizePool * 90) / 100;
+    payable(winner).transfer(reward);
+    prizePool = address(this).balance; // Remaining 10% stays for the next round
+    emit GameWon(winner, reward);
 
-        _resetGame();
-    }
+    _resetGame();
+}
 
     function _resetGame() internal {
         round++;
@@ -122,7 +145,13 @@ contract TreasureHunt is ReentrancyGuard {
         return true;
     }
 
-    function isAdjacent(uint8 pos1, uint8 pos2) internal pure returns (bool) {
-        return (pos1 == pos2 + 1 || pos1 == pos2 - 1 || pos1 == pos2 + GRID_SIZE || pos1 == pos2 - GRID_SIZE);
-    }
+   function isAdjacent(uint8 pos1, uint8 pos2) internal pure returns (bool) {
+    // Avoid overflow/underflow on edges
+    bool isUp = (pos1 >= GRID_SIZE && pos1 - GRID_SIZE == pos2);
+    bool isDown = (pos1 < TOTAL_CELLS - GRID_SIZE && pos1 + GRID_SIZE == pos2);
+    bool isLeft = (pos1 % GRID_SIZE != 0 && pos1 - 1 == pos2);
+    bool isRight = ((pos1 + 1) % GRID_SIZE != 0 && pos1 + 1 == pos2);
+
+    return isUp || isDown || isLeft || isRight;
+}
 }
